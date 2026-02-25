@@ -1,0 +1,11 @@
+[package]
+name = "tropa-relay"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net", "signal"] }
+fast-socks5 = "0.9"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "6"
