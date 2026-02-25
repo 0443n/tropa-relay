@@ -41,11 +41,11 @@
 
 ## GUI Improvements
 
-- [ ] Add/edit proxy should open a real separate window, not a modal inside the main window
-- [ ] Fix inconsistent button heights across the UI
-- [ ] Fix text alignment and spacing — things feel misplaced
-- [ ] Replace the pill toggle switch with something less out-of-place
-- [ ] Make the UI feel less flat and more responsive (hover states, feedback, depth)
+- [x] Add/edit proxy should open a real separate window, not a modal inside the main window
+- [x] Fix inconsistent button heights across the UI
+- [x] Fix text alignment and spacing — things feel misplaced
+- [x] Replace the pill toggle switch with something less out-of-place
+- [x] Make the UI feel less flat and more responsive (hover states, feedback, depth)
 
 ## Phase 6: Polish + Ship
 
