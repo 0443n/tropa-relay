@@ -84,8 +84,9 @@ async fn socks5_reply(stream: &mut TcpStream, success: bool) -> std::io::Result<
 async fn handle_connection(mut local: TcpStream, entry: &ProxyEntry) {
     let (host, port) = match socks5_accept(&mut local).await {
         Ok(target) => target,
-        Err(e) => {
-            eprintln!("[{}] handshake failed: {e}", entry.name);
+        Err(_e) => {
+            #[cfg(debug_assertions)]
+            eprintln!("[{}] handshake failed: {_e}", entry.name);
             return;
         }
     };
@@ -103,25 +104,26 @@ async fn handle_connection(mut local: TcpStream, entry: &ProxyEntry) {
 
     let mut upstream = match upstream {
         Ok(s) => {
-            if let Err(e) = socks5_reply(&mut local, true).await {
-                eprintln!("[{}] failed to send reply: {e}", entry.name);
+            if let Err(_e) = socks5_reply(&mut local, true).await {
+                #[cfg(debug_assertions)]
+                eprintln!("[{}] failed to send reply: {_e}", entry.name);
                 return;
             }
             s
         }
-        Err(e) => {
-            eprintln!("[{}] upstream connect to {host}:{port} via {upstream_addr} failed: {e}", entry.name);
+        Err(_e) => {
+            #[cfg(debug_assertions)]
+            eprintln!("[{}] upstream connect to {host}:{port} via {upstream_addr} failed: {_e}", entry.name);
             let _ = socks5_reply(&mut local, false).await;
             return;
         }
     };
 
     match tokio::io::copy_bidirectional(&mut local, &mut upstream).await {
-        Ok((tx, rx)) => {
-            eprintln!("[{}] {host}:{port} done (tx={tx}, rx={rx})", entry.name);
-        }
-        Err(e) => {
-            eprintln!("[{}] relay error for {host}:{port}: {e}", entry.name);
+        Ok(_) => {}
+        Err(_e) => {
+            #[cfg(debug_assertions)]
+            eprintln!("[{}] relay error for {host}:{port}: {_e}", entry.name);
         }
     }
 }
@@ -151,8 +153,9 @@ pub async fn run_relay(entry: ProxyEntry, mut shutdown: watch::Receiver<bool>) {
                             handle_connection(stream, &entry).await;
                         });
                     }
-                    Err(e) => {
-                        eprintln!("[{}] accept error: {e}", entry.name);
+                    Err(_e) => {
+                        #[cfg(debug_assertions)]
+                        eprintln!("[{}] accept error: {_e}", entry.name);
                     }
                 }
             }
