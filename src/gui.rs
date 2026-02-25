@@ -1,90 +1,95 @@
 use crate::config::{AppConfig, ProxyEntry};
 use crate::relay;
-use eframe::egui;
-use std::cell::Cell;
+use iced::widget::{
+    button, checkbox, column, container, row, rule, scrollable, space, text, text_input,
+};
+use iced::{Border, Color, Element, Length, Shadow, Size, Task, Theme, Vector};
 use std::collections::HashMap;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-// ── Sizing (8px grid) ──────────────────────────────────────────
-const BTN_H: f32 = 32.0;
+// ── Colors ──────────────────────────────────────────────────────
+const ACCENT: Color = Color::from_rgb(0.235, 0.514, 0.969);
+const ACCENT_HOVER: Color = Color::from_rgb(0.30, 0.58, 1.0);
+const ACCENT_PRESS: Color = Color::from_rgb(0.18, 0.44, 0.85);
+const DANGER: Color = Color::from_rgb(0.898, 0.224, 0.278);
+const DANGER_HOVER: Color = Color::from_rgb(1.0, 0.30, 0.35);
+const DANGER_PRESS: Color = Color::from_rgb(0.75, 0.15, 0.20);
+const SURFACE: Color = Color::from_rgb(0.16, 0.16, 0.16);
+const SURFACE_LIGHT: Color = Color::from_rgb(0.22, 0.22, 0.22);
+const SURFACE_LIGHTER: Color = Color::from_rgb(0.28, 0.28, 0.28);
+const TEXT_DIM: Color = Color::from_rgb(0.55, 0.55, 0.55);
+const TEXT_MUTED: Color = Color::from_rgb(0.70, 0.70, 0.70);
+const BORDER_SUBTLE: Color = Color::from_rgb(0.25, 0.25, 0.25);
 
-// ── Colors ─────────────────────────────────────────────────────
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(59, 130, 246);
-const DANGER: egui::Color32 = egui::Color32::from_rgb(220, 53, 69);
-
-// ── Card helpers ───────────────────────────────────────────────
-fn card_shadow() -> egui::Shadow {
-    egui::Shadow {
-        offset: [0, 2],
-        blur: 8,
-        spread: 0,
-        color: egui::Color32::from_black_alpha(25),
-    }
-}
-
-fn card_fill(dark: bool, hovered: bool) -> egui::Color32 {
-    match (dark, hovered) {
-        (true, false) => egui::Color32::from_gray(35),
-        (true, true) => egui::Color32::from_gray(45),
-        (false, false) => egui::Color32::from_gray(245),
-        (false, true) => egui::Color32::from_gray(235),
-    }
-}
-
-// ── Relay handle ───────────────────────────────────────────────
+// ── Relay handle ────────────────────────────────────────────────
 struct RelayHandle {
     shutdown_tx: watch::Sender<bool>,
     _task: JoinHandle<()>,
 }
 
-// ── App state ──────────────────────────────────────────────────
-pub struct TropaApp {
+// ── Views ───────────────────────────────────────────────────────
+#[derive(Debug, Clone)]
+enum View {
+    List,
+    EditForm,
+}
+
+// ── Draft proxy (form state) ────────────────────────────────────
+#[derive(Debug, Clone)]
+struct DraftProxy {
+    name: String,
+    remote_host: String,
+    remote_port: String,
+    username: String,
+    password: String,
+    local_port: String,
+    enabled: bool,
+}
+
+impl Default for DraftProxy {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            remote_host: String::new(),
+            remote_port: "1080".into(),
+            username: String::new(),
+            password: String::new(),
+            local_port: String::new(),
+            enabled: true,
+        }
+    }
+}
+
+// ── App state ───────────────────────────────────────────────────
+struct State {
     rt: tokio::runtime::Runtime,
     config: AppConfig,
     relays: HashMap<usize, RelayHandle>,
-    // Card hover tracking (one-frame delay, feels natural)
-    card_hovers: Vec<bool>,
-    // Edit viewport state
-    show_edit_viewport: bool,
+    view: View,
     editing_index: Option<usize>,
-    draft_name: String,
-    draft_remote_host: String,
-    draft_remote_port: String,
-    draft_username: String,
-    draft_password: String,
-    draft_local_port: String,
-    draft_enabled: bool,
+    draft: DraftProxy,
     edit_error: String,
-    // Delete confirmation
     confirm_delete: Option<usize>,
 }
 
-impl TropaApp {
-    fn new() -> Self {
+impl Default for State {
+    fn default() -> Self {
         let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         let config = AppConfig::load();
 
-        let mut app = Self {
+        let mut state = Self {
             rt,
             config,
             relays: HashMap::new(),
-            card_hovers: Vec::new(),
-            show_edit_viewport: false,
+            view: View::List,
             editing_index: None,
-            draft_name: String::new(),
-            draft_remote_host: String::new(),
-            draft_remote_port: String::new(),
-            draft_username: String::new(),
-            draft_password: String::new(),
-            draft_local_port: String::new(),
-            draft_enabled: true,
+            draft: DraftProxy::default(),
             edit_error: String::new(),
             confirm_delete: None,
         };
 
-        // Start all enabled proxies on launch
-        let enabled: Vec<usize> = app
+        let enabled: Vec<usize> = state
             .config
             .proxies
             .iter()
@@ -93,12 +98,35 @@ impl TropaApp {
             .map(|(i, _)| i)
             .collect();
         for i in enabled {
-            app.start_relay(i);
+            state.start_relay(i);
         }
 
-        app
+        state
     }
+}
 
+// ── Messages ────────────────────────────────────────────────────
+#[derive(Debug, Clone)]
+enum Message {
+    OpenAddForm,
+    OpenEditForm(usize),
+    GoBack,
+    NameChanged(String),
+    RemoteHostChanged(String),
+    RemotePortChanged(String),
+    UsernameChanged(String),
+    PasswordChanged(String),
+    LocalPortChanged(String),
+    EnabledToggled(bool),
+    SaveProxy,
+    ToggleProxy(usize),
+    RequestDelete(usize),
+    ConfirmDelete(usize),
+    CancelDelete,
+}
+
+// ── Relay management ────────────────────────────────────────────
+impl State {
     fn start_relay(&mut self, index: usize) {
         if self.relays.contains_key(&index) {
             return;
@@ -140,66 +168,38 @@ impl TropaApp {
         let _ = self.config.save();
     }
 
-    fn open_add_dialog(&mut self) {
-        self.editing_index = None;
-        self.draft_name.clear();
-        self.draft_remote_host.clear();
-        self.draft_remote_port = "1080".into();
-        self.draft_username.clear();
-        self.draft_password.clear();
-        self.draft_local_port.clear();
-        self.draft_enabled = true;
-        self.edit_error.clear();
-        self.show_edit_viewport = true;
-    }
-
-    fn open_edit_dialog(&mut self, index: usize) {
-        if let Some(proxy) = self.config.proxies.get(index) {
-            self.editing_index = Some(index);
-            self.draft_name = proxy.name.clone();
-            self.draft_remote_host = proxy.remote_host.clone();
-            self.draft_remote_port = proxy.remote_port.to_string();
-            self.draft_username = proxy.username.clone();
-            self.draft_password = proxy.password.clone();
-            self.draft_local_port = proxy.local_port.to_string();
-            self.draft_enabled = proxy.enabled;
-            self.edit_error.clear();
-            self.show_edit_viewport = true;
-        }
-    }
-
     fn save_draft(&mut self) {
-        let remote_port: u16 = match self.draft_remote_port.parse() {
+        let remote_port: u16 = match self.draft.remote_port.parse() {
             Ok(p) => p,
             Err(_) => {
                 self.edit_error = "Invalid remote port".into();
                 return;
             }
         };
-        let local_port: u16 = match self.draft_local_port.parse() {
+        let local_port: u16 = match self.draft.local_port.parse() {
             Ok(p) => p,
             Err(_) => {
                 self.edit_error = "Invalid local port".into();
                 return;
             }
         };
-        if self.draft_name.trim().is_empty() {
+        if self.draft.name.trim().is_empty() {
             self.edit_error = "Name is required".into();
             return;
         }
-        if self.draft_remote_host.trim().is_empty() {
+        if self.draft.remote_host.trim().is_empty() {
             self.edit_error = "Remote host is required".into();
             return;
         }
 
         let entry = ProxyEntry {
-            name: self.draft_name.trim().to_string(),
-            remote_host: self.draft_remote_host.trim().to_string(),
+            name: self.draft.name.trim().to_string(),
+            remote_host: self.draft.remote_host.trim().to_string(),
             remote_port,
-            username: self.draft_username.clone(),
-            password: self.draft_password.clone(),
+            username: self.draft.username.clone(),
+            password: self.draft.password.clone(),
             local_port,
-            enabled: self.draft_enabled,
+            enabled: self.draft.enabled,
         };
 
         match self.editing_index {
@@ -223,380 +223,296 @@ impl TropaApp {
         }
 
         let _ = self.config.save();
-        self.show_edit_viewport = false;
+        self.view = View::List;
     }
 }
 
-impl eframe::App for TropaApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let dark = ctx.style().visuals.dark_mode;
-
-        // ── Main panel ─────────────────────────────────────────
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // Top bar
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.heading("Tropa Relay");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new("+ Add Proxy")
-                                    .size(14.0)
-                                    .color(egui::Color32::WHITE),
-                            )
-                            .fill(ACCENT)
-                            .min_size(egui::vec2(120.0, BTN_H)),
-                        )
-                        .clicked()
-                    {
-                        self.open_add_dialog();
-                    }
-                });
-            });
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(8.0);
-
-            if self.config.proxies.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(60.0);
-                    ui.label(
-                        egui::RichText::new("No proxies configured")
-                            .size(18.0)
-                            .weak(),
-                    );
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("Click \"+ Add Proxy\" to get started.")
-                            .size(14.0)
-                            .weak(),
-                    );
-                });
-            } else {
-                // Snapshot proxy data for cards (avoids borrow conflicts)
-                let proxies: Vec<(usize, String, String, u16, u16, bool)> = self
-                    .config
-                    .proxies
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| {
-                        (
-                            i,
-                            p.name.clone(),
-                            p.remote_host.clone(),
-                            p.remote_port,
-                            p.local_port,
-                            p.enabled,
-                        )
-                    })
-                    .collect();
-
-                let old_hovers = std::mem::take(&mut self.card_hovers);
-                let new_hovers = Cell::new(Vec::with_capacity(proxies.len()));
-                let toggle_action = Cell::new(None);
-                let edit_action = Cell::new(None);
-                let delete_action = Cell::new(None);
-
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (idx, (i, name, host, remote_port, local_port, enabled)) in
-                        proxies.iter().enumerate()
-                    {
-                        let hovered = old_hovers.get(idx).copied().unwrap_or(false);
-
-                        let frame_resp = egui::Frame::new()
-                            .fill(card_fill(dark, hovered))
-                            .shadow(card_shadow())
-                            .corner_radius(egui::CornerRadius::same(8))
-                            .inner_margin(egui::Margin::same(16))
-                            .show(ui, |ui| {
-                                // Row 1: proxy name + ON/OFF toggle
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(name).strong().size(16.0),
-                                    );
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            let text = if *enabled { "ON" } else { "OFF" };
-                                            let fill = if *enabled {
-                                                ACCENT
-                                            } else {
-                                                egui::Color32::from_gray(80)
-                                            };
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new(text)
-                                                            .size(12.0)
-                                                            .color(egui::Color32::WHITE),
-                                                    )
-                                                    .fill(fill)
-                                                    .min_size(egui::vec2(40.0, 24.0)),
-                                                )
-                                                .clicked()
-                                            {
-                                                toggle_action.set(Some(*i));
-                                            }
-                                        },
-                                    );
-                                });
-
-                                // 4px gap
-                                ui.add_space(4.0);
-
-                                // Row 2: connection details
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{}:{} \u{2192} local {}",
-                                        host, remote_port, local_port
-                                    ))
-                                    .weak()
-                                    .size(13.0),
-                                );
-
-                                // 8px gap
-                                ui.add_space(8.0);
-
-                                // Row 3: Edit / Delete right-aligned
-                                ui.horizontal(|ui| {
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new("Delete")
-                                                            .size(13.0)
-                                                            .color(DANGER),
-                                                    )
-                                                    .frame(false),
-                                                )
-                                                .clicked()
-                                            {
-                                                delete_action.set(Some(*i));
-                                            }
-                                            ui.add_space(8.0);
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        egui::RichText::new("Edit").size(13.0),
-                                                    )
-                                                    .frame(false),
-                                                )
-                                                .clicked()
-                                            {
-                                                edit_action.set(Some(*i));
-                                            }
-                                        },
-                                    );
-                                });
-                            });
-
-                        // Track hover for next frame
-                        let mut hovers = new_hovers.take();
-                        hovers.push(frame_resp.response.hovered());
-                        new_hovers.set(hovers);
-
-                        ui.add_space(8.0);
-                    }
-                });
-
-                self.card_hovers = new_hovers.into_inner();
-
-                // Apply deferred actions
-                if let Some(i) = toggle_action.get() {
-                    self.config.proxies[i].enabled = !self.config.proxies[i].enabled;
-                    if self.config.proxies[i].enabled {
-                        self.start_relay(i);
+// ── Update ──────────────────────────────────────────────────────
+impl State {
+    fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::OpenAddForm => {
+                self.editing_index = None;
+                self.draft = DraftProxy::default();
+                self.edit_error.clear();
+                self.view = View::EditForm;
+            }
+            Message::OpenEditForm(index) => {
+                if let Some(proxy) = self.config.proxies.get(index) {
+                    self.editing_index = Some(index);
+                    self.draft = DraftProxy {
+                        name: proxy.name.clone(),
+                        remote_host: proxy.remote_host.clone(),
+                        remote_port: proxy.remote_port.to_string(),
+                        username: proxy.username.clone(),
+                        password: proxy.password.clone(),
+                        local_port: proxy.local_port.to_string(),
+                        enabled: proxy.enabled,
+                    };
+                    self.edit_error.clear();
+                    self.view = View::EditForm;
+                }
+            }
+            Message::GoBack => {
+                self.view = View::List;
+            }
+            Message::NameChanged(val) => self.draft.name = val,
+            Message::RemoteHostChanged(val) => self.draft.remote_host = val,
+            Message::RemotePortChanged(val) => self.draft.remote_port = val,
+            Message::UsernameChanged(val) => self.draft.username = val,
+            Message::PasswordChanged(val) => self.draft.password = val,
+            Message::LocalPortChanged(val) => self.draft.local_port = val,
+            Message::EnabledToggled(val) => self.draft.enabled = val,
+            Message::SaveProxy => {
+                self.save_draft();
+            }
+            Message::ToggleProxy(index) => {
+                if index < self.config.proxies.len() {
+                    self.config.proxies[index].enabled = !self.config.proxies[index].enabled;
+                    if self.config.proxies[index].enabled {
+                        self.start_relay(index);
                     } else {
-                        self.stop_relay(i);
+                        self.stop_relay(index);
                     }
                     let _ = self.config.save();
                 }
-                if let Some(i) = edit_action.get() {
-                    self.open_edit_dialog(i);
-                }
-                if let Some(i) = delete_action.get() {
-                    self.confirm_delete = Some(i);
-                }
             }
-        });
-
-        // ── Edit/Add viewport (real OS window) ────────────────
-        if self.show_edit_viewport {
-            let title = if self.editing_index.is_some() {
-                "Edit Proxy"
-            } else {
-                "Add Proxy"
-            };
-
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("edit_proxy"),
-                egui::ViewportBuilder::default()
-                    .with_title(title)
-                    .with_inner_size([420.0, 320.0])
-                    .with_resizable(false)
-                    .with_always_on_top(),
-                |ctx, _class| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        ui.add_space(8.0);
-
-                        egui::Grid::new("edit_form")
-                            .num_columns(2)
-                            .spacing([12.0, 10.0])
-                            .show(ui, |ui| {
-                                ui.label("Name:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_name)
-                                        .desired_width(280.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Remote host:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_remote_host)
-                                        .desired_width(280.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Remote port:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_remote_port)
-                                        .desired_width(280.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Username:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_username)
-                                        .desired_width(280.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Password:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_password)
-                                        .desired_width(280.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Local port:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.draft_local_port)
-                                        .desired_width(280.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Enabled:");
-                                ui.checkbox(&mut self.draft_enabled, "");
-                                ui.end_row();
-                            });
-
-                        if !self.edit_error.is_empty() {
-                            ui.add_space(4.0);
-                            ui.colored_label(egui::Color32::RED, &self.edit_error);
-                        }
-
-                        ui.add_space(16.0);
-                        ui.separator();
-                        ui.add_space(8.0);
-
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Save")
-                                            .size(14.0)
-                                            .color(egui::Color32::WHITE),
-                                    )
-                                    .fill(ACCENT)
-                                    .min_size(egui::vec2(80.0, BTN_H)),
-                                )
-                                .clicked()
-                            {
-                                self.save_draft();
-                            }
-                            if ui
-                                .add(
-                                    egui::Button::new(egui::RichText::new("Cancel").size(14.0))
-                                        .min_size(egui::vec2(80.0, BTN_H)),
-                                )
-                                .clicked()
-                            {
-                                self.show_edit_viewport = false;
-                            }
-                        });
-                    });
-
-                    if ctx.input(|i| i.viewport().close_requested()) {
-                        self.show_edit_viewport = false;
-                    }
-                },
-            );
-        }
-
-        // ── Delete confirmation ────────────────────────────────
-        if let Some(index) = self.confirm_delete {
-            let name = self
-                .config
-                .proxies
-                .get(index)
-                .map(|p| p.name.clone())
-                .unwrap_or_default();
-            let mut open = true;
-            let mut do_delete = false;
-            let mut do_cancel = false;
-
-            egui::Window::new("Confirm Delete")
-                .open(&mut open)
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
-                    ui.label(format!("Delete proxy \"{}\"?", name));
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("Delete")
-                                        .size(14.0)
-                                        .color(egui::Color32::WHITE),
-                                )
-                                .fill(DANGER)
-                                .min_size(egui::vec2(80.0, BTN_H)),
-                            )
-                            .clicked()
-                        {
-                            do_delete = true;
-                        }
-                        if ui
-                            .add(
-                                egui::Button::new(egui::RichText::new("Cancel").size(14.0))
-                                    .min_size(egui::vec2(80.0, BTN_H)),
-                            )
-                            .clicked()
-                        {
-                            do_cancel = true;
-                        }
-                    });
-                });
-
-            if !open || do_cancel {
-                self.confirm_delete = None;
+            Message::RequestDelete(index) => {
+                self.confirm_delete = Some(index);
             }
-            if do_delete {
+            Message::ConfirmDelete(index) => {
                 self.remove_proxy(index);
                 self.confirm_delete = None;
             }
+            Message::CancelDelete => {
+                self.confirm_delete = None;
+            }
         }
+        Task::none()
     }
 }
 
-impl Drop for TropaApp {
+// ── View ────────────────────────────────────────────────────────
+impl State {
+    fn view(&self) -> Element<'_, Message> {
+        match &self.view {
+            View::List => self.view_list(),
+            View::EditForm => self.view_edit_form(),
+        }
+    }
+
+    fn view_list(&self) -> Element<'_, Message> {
+        let header = row![
+            text("Tropa Relay").size(22),
+            space::horizontal(),
+            button(text("+ Add Proxy").size(14))
+                .on_press(Message::OpenAddForm)
+                .padding([6, 16])
+                .style(accent_button_style),
+        ]
+        .align_y(iced::Alignment::Center);
+
+        let content: Element<'_, Message> = if self.config.proxies.is_empty() {
+            container(
+                column![
+                    text("No proxies configured").size(18).color(TEXT_DIM),
+                    text("Click \"+ Add Proxy\" to get started.")
+                        .size(14)
+                        .color(TEXT_DIM),
+                ]
+                .spacing(8)
+                .align_x(iced::Alignment::Center),
+            )
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
+        } else {
+            let cards: Vec<Element<'_, Message>> = self
+                .config
+                .proxies
+                .iter()
+                .enumerate()
+                .map(|(i, proxy)| self.view_proxy_card(i, proxy))
+                .collect();
+
+            scrollable(column(cards).spacing(8).width(Length::Fill)).into()
+        };
+
+        container(
+            column![header, rule::horizontal(1), content]
+                .spacing(8)
+                .padding(16),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn view_proxy_card<'a>(
+        &'a self,
+        index: usize,
+        proxy: &'a ProxyEntry,
+    ) -> Element<'a, Message> {
+        if self.confirm_delete == Some(index) {
+            let confirm_row = row![
+                text(format!("Delete \"{}\"?", proxy.name)).size(15),
+                space::horizontal(),
+                button(text("Delete").size(13))
+                    .on_press(Message::ConfirmDelete(index))
+                    .padding([6, 16])
+                    .style(danger_button_style),
+                button(text("Cancel").size(13))
+                    .on_press(Message::CancelDelete)
+                    .padding([6, 16])
+                    .style(neutral_button_style),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
+
+            return container(confirm_row)
+                .padding(16)
+                .width(Length::Fill)
+                .style(card_container_style)
+                .into();
+        }
+
+        let toggle_label = if proxy.enabled { "ON" } else { "OFF" };
+        let toggle_style: fn(&Theme, button::Status) -> button::Style = if proxy.enabled {
+            on_button_style
+        } else {
+            off_button_style
+        };
+
+        let name_text = text(&proxy.name).size(16).font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..iced::Font::DEFAULT
+        });
+
+        let row1 = row![
+            name_text,
+            space::horizontal(),
+            button(text(toggle_label).size(12))
+                .on_press(Message::ToggleProxy(index))
+                .padding([4, 12])
+                .style(toggle_style),
+        ]
+        .align_y(iced::Alignment::Center);
+
+        let subtitle = text(format!(
+            "{}:{} \u{2192} local {}",
+            proxy.remote_host, proxy.remote_port, proxy.local_port
+        ))
+        .size(13)
+        .color(TEXT_DIM);
+
+        let row3 = row![
+            space::horizontal(),
+            button(text("Edit").size(13).color(TEXT_MUTED))
+                .on_press(Message::OpenEditForm(index))
+                .padding([4, 8])
+                .style(ghost_button_style),
+            button(text("Delete").size(13).color(DANGER))
+                .on_press(Message::RequestDelete(index))
+                .padding([4, 8])
+                .style(ghost_button_style),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+
+        container(
+            column![row1, subtitle, row3]
+                .spacing(4)
+                .width(Length::Fill),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .style(card_container_style)
+        .into()
+    }
+
+    fn view_edit_form(&self) -> Element<'_, Message> {
+        let title = if self.editing_index.is_some() {
+            "Edit Proxy"
+        } else {
+            "Add Proxy"
+        };
+
+        let header = row![
+            text(title).size(22),
+            space::horizontal(),
+            button(text("\u{2190} Back").size(14))
+                .on_press(Message::GoBack)
+                .padding([6, 16])
+                .style(neutral_button_style),
+        ]
+        .align_y(iced::Alignment::Center);
+
+        let form = column![
+            form_field("Name", &self.draft.name, Message::NameChanged),
+            form_field(
+                "Remote host",
+                &self.draft.remote_host,
+                Message::RemoteHostChanged
+            ),
+            form_field(
+                "Remote port",
+                &self.draft.remote_port,
+                Message::RemotePortChanged
+            ),
+            form_field("Username", &self.draft.username, Message::UsernameChanged),
+            form_field("Password", &self.draft.password, Message::PasswordChanged),
+            form_field(
+                "Local port",
+                &self.draft.local_port,
+                Message::LocalPortChanged
+            ),
+            row![
+                text("Enabled").width(100),
+                checkbox(self.draft.enabled)
+                    .on_toggle(Message::EnabledToggled)
+                    .style(checkbox_style),
+            ]
+            .spacing(12)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(10);
+
+        let mut content = column![header, rule::horizontal(1), form].spacing(8);
+
+        if !self.edit_error.is_empty() {
+            content = content.push(
+                text(&self.edit_error)
+                    .size(14)
+                    .color(Color::from_rgb(1.0, 0.3, 0.3)),
+            );
+        }
+
+        let buttons = row![
+            button(text("Save").size(14))
+                .on_press(Message::SaveProxy)
+                .padding([6, 16])
+                .style(accent_button_style),
+            button(text("Cancel").size(14))
+                .on_press(Message::GoBack)
+                .padding([6, 16])
+                .style(neutral_button_style),
+        ]
+        .spacing(8);
+
+        content = content.push(buttons);
+
+        container(content.padding(16))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn theme(&self) -> Theme {
+        Theme::Dark
+    }
+}
+
+impl Drop for State {
     fn drop(&mut self) {
         for (_, handle) in self.relays.drain() {
             let _ = handle.shutdown_tx.send(true);
@@ -604,73 +520,238 @@ impl Drop for TropaApp {
     }
 }
 
-pub fn run_gui() {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([550.0, 400.0]),
-        ..Default::default()
+// ── Helper: form field row ──────────────────────────────────────
+fn form_field<'a>(
+    label: &'a str,
+    value: &'a str,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    row![
+        text(label).width(100),
+        text_input("", value)
+            .on_input(on_input)
+            .style(input_style),
+    ]
+    .spacing(12)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+// ── Style: square border helper ─────────────────────────────────
+const SQUARE: Border = Border {
+    color: Color::TRANSPARENT,
+    width: 0.0,
+    radius: iced::border::Radius {
+        top_left: 0.0,
+        top_right: 0.0,
+        bottom_right: 0.0,
+        bottom_left: 0.0,
+    },
+};
+
+fn square_border_with(color: Color, width: f32) -> Border {
+    Border {
+        color,
+        width,
+        ..SQUARE
+    }
+}
+
+// ── Style: buttons ──────────────────────────────────────────────
+fn accent_button_style(_theme: &Theme, status: button::Status) -> button::Style {
+    let base = button::Style {
+        background: Some(ACCENT.into()),
+        text_color: Color::WHITE,
+        border: SQUARE,
+        shadow: Shadow::default(),
+        snap: false,
     };
-    eframe::run_native(
-        "Tropa Relay",
-        options,
-        Box::new(|cc| {
-            let ctx = &cc.egui_ctx;
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(ACCENT_HOVER.into()),
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(ACCENT_PRESS.into()),
+            ..base
+        },
+        _ => base,
+    }
+}
 
-            // Enable real OS windows for viewports (not embedded panels)
-            ctx.set_embed_viewports(false);
+fn danger_button_style(_theme: &Theme, status: button::Status) -> button::Style {
+    let base = button::Style {
+        background: Some(DANGER.into()),
+        text_color: Color::WHITE,
+        border: SQUARE,
+        shadow: Shadow::default(),
+        snap: false,
+    };
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(DANGER_HOVER.into()),
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(DANGER_PRESS.into()),
+            ..base
+        },
+        _ => base,
+    }
+}
 
-            let mut style = (*ctx.style()).clone();
+fn neutral_button_style(_theme: &Theme, status: button::Status) -> button::Style {
+    let base = button::Style {
+        background: Some(SURFACE_LIGHT.into()),
+        text_color: Color::WHITE,
+        border: square_border_with(BORDER_SUBTLE, 1.0),
+        shadow: Shadow::default(),
+        snap: false,
+    };
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(SURFACE_LIGHTER.into()),
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(SURFACE.into()),
+            ..base
+        },
+        _ => base,
+    }
+}
 
-            // Font sizes
-            style
-                .text_styles
-                .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
-            style
-                .text_styles
-                .insert(egui::TextStyle::Heading, egui::FontId::proportional(22.0));
-            style
-                .text_styles
-                .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
+fn on_button_style(_theme: &Theme, status: button::Status) -> button::Style {
+    let base = button::Style {
+        background: Some(ACCENT.into()),
+        text_color: Color::WHITE,
+        border: SQUARE,
+        shadow: Shadow::default(),
+        snap: false,
+    };
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(ACCENT_HOVER.into()),
+            ..base
+        },
+        _ => base,
+    }
+}
 
-            // Spacing (8px grid)
-            style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-            style.spacing.button_padding = egui::vec2(16.0, 6.0);
+fn off_button_style(_theme: &Theme, status: button::Status) -> button::Style {
+    let base = button::Style {
+        background: Some(SURFACE_LIGHT.into()),
+        text_color: TEXT_MUTED,
+        border: square_border_with(BORDER_SUBTLE, 1.0),
+        shadow: Shadow::default(),
+        snap: false,
+    };
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(SURFACE_LIGHTER.into()),
+            ..base
+        },
+        _ => base,
+    }
+}
 
-            // Static text should not be selectable
-            style.interaction.selectable_labels = false;
+fn ghost_button_style(_theme: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(SURFACE_LIGHT.into()),
+            text_color: Color::WHITE,
+            border: SQUARE,
+            shadow: Shadow::default(),
+            snap: false,
+        },
+        _ => button::Style {
+            background: None,
+            text_color: TEXT_MUTED,
+            border: SQUARE,
+            shadow: Shadow::default(),
+            snap: false,
+        },
+    }
+}
 
-            // Rounded widgets
-            let cr = egui::CornerRadius::same(6);
-            style.visuals.widgets.noninteractive.corner_radius = cr;
-            style.visuals.widgets.inactive.corner_radius = cr;
-            style.visuals.widgets.hovered.corner_radius = cr;
-            style.visuals.widgets.active.corner_radius = cr;
-            style.visuals.widgets.open.corner_radius = cr;
+// ── Style: card container ───────────────────────────────────────
+fn card_container_style(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(SURFACE.into()),
+        border: square_border_with(BORDER_SUBTLE, 1.0),
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.15),
+            offset: Vector::new(0.0, 1.0),
+            blur_radius: 4.0,
+        },
+        text_color: None,
+        snap: false,
+    }
+}
 
-            // Enhanced hover/active feedback (dark mode)
-            if style.visuals.dark_mode {
-                style.visuals.widgets.inactive.bg_fill = egui::Color32::from_gray(40);
-                style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::from_gray(40);
-                style.visuals.widgets.hovered.bg_fill = egui::Color32::from_gray(60);
-                style.visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_gray(60);
-                style.visuals.widgets.hovered.bg_stroke =
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(100));
-                style.visuals.widgets.active.bg_fill = egui::Color32::from_gray(75);
-                style.visuals.widgets.active.weak_bg_fill = egui::Color32::from_gray(75);
-            }
+// ── Style: text input ───────────────────────────────────────────
+fn input_style(_theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let base = text_input::Style {
+        background: SURFACE.into(),
+        border: square_border_with(BORDER_SUBTLE, 1.0),
+        icon: TEXT_DIM,
+        placeholder: TEXT_DIM,
+        value: Color::WHITE,
+        selection: ACCENT,
+    };
+    match status {
+        text_input::Status::Focused { .. } => text_input::Style {
+            border: square_border_with(ACCENT, 1.0),
+            ..base
+        },
+        text_input::Status::Hovered => text_input::Style {
+            border: square_border_with(TEXT_MUTED, 1.0),
+            ..base
+        },
+        text_input::Status::Disabled => text_input::Style {
+            value: TEXT_DIM,
+            ..base
+        },
+        _ => base,
+    }
+}
 
-            // Rounded windows + visible shadow
-            style.visuals.window_corner_radius = egui::CornerRadius::same(10);
-            style.visuals.window_shadow = egui::Shadow {
-                offset: [0, 4],
-                blur: 16,
-                spread: 2,
-                color: egui::Color32::from_black_alpha(40),
-            };
+// ── Style: checkbox ─────────────────────────────────────────────
+fn checkbox_style(_theme: &Theme, status: checkbox::Status) -> checkbox::Style {
+    match status {
+        checkbox::Status::Active { is_checked: true }
+        | checkbox::Status::Disabled { is_checked: true } => checkbox::Style {
+            background: ACCENT.into(),
+            icon_color: Color::WHITE,
+            border: SQUARE,
+            text_color: None,
+        },
+        checkbox::Status::Hovered { is_checked: true } => checkbox::Style {
+            background: ACCENT_HOVER.into(),
+            icon_color: Color::WHITE,
+            border: SQUARE,
+            text_color: None,
+        },
+        checkbox::Status::Hovered { is_checked: false } => checkbox::Style {
+            background: SURFACE_LIGHTER.into(),
+            icon_color: Color::WHITE,
+            border: square_border_with(TEXT_MUTED, 1.0),
+            text_color: None,
+        },
+        _ => checkbox::Style {
+            background: SURFACE_LIGHT.into(),
+            icon_color: Color::WHITE,
+            border: square_border_with(BORDER_SUBTLE, 1.0),
+            text_color: None,
+        },
+    }
+}
 
-            ctx.set_style(style);
-
-            Ok(Box::new(TropaApp::new()))
-        }),
-    )
-    .expect("failed to launch GUI");
+// ── Entry point ─────────────────────────────────────────────────
+pub fn run_gui() -> iced::Result {
+    iced::application(|| State::default(), State::update, State::view)
+        .title("Tropa Relay")
+        .window_size(Size::new(550.0, 400.0))
+        .theme(State::theme)
+        .run()
 }

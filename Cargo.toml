@@ -9,7 +9,4 @@ fast-socks5 = "0.9"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 dirs = "6"
-eframe = { version = "0.33", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
-
-[patch.crates-io]
-winit = { path = "patches/winit-0.30.12" }
+iced = "0.14"
