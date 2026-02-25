@@ -58,8 +58,6 @@ pub struct TropaApp {
     edit_error: String,
     // Delete confirmation
     confirm_delete: Option<usize>,
-    // Password visibility
-    show_password: bool,
 }
 
 impl TropaApp {
@@ -83,7 +81,6 @@ impl TropaApp {
             draft_enabled: true,
             edit_error: String::new(),
             confirm_delete: None,
-            show_password: false,
         };
 
         // Start all enabled proxies on launch
@@ -153,7 +150,6 @@ impl TropaApp {
         self.draft_local_port.clear();
         self.draft_enabled = true;
         self.edit_error.clear();
-        self.show_password = false;
         self.show_edit_viewport = true;
     }
 
@@ -168,7 +164,6 @@ impl TropaApp {
             self.draft_local_port = proxy.local_port.to_string();
             self.draft_enabled = proxy.enabled;
             self.edit_error.clear();
-            self.show_password = false;
             self.show_edit_viewport = true;
         }
     }
@@ -440,8 +435,9 @@ impl eframe::App for TropaApp {
                 egui::ViewportId::from_hash_of("edit_proxy"),
                 egui::ViewportBuilder::default()
                     .with_title(title)
-                    .with_inner_size([420.0, 400.0])
-                    .with_resizable(false),
+                    .with_inner_size([420.0, 320.0])
+                    .with_resizable(false)
+                    .with_always_on_top(),
                 |ctx, _class| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         ui.add_space(8.0);
@@ -479,25 +475,10 @@ impl eframe::App for TropaApp {
                                 ui.end_row();
 
                                 ui.label("Password:");
-                                ui.horizontal(|ui| {
-                                    let show = self.show_password;
-                                    let mut edit =
-                                        egui::TextEdit::singleline(&mut self.draft_password)
-                                            .desired_width(220.0);
-                                    if !show {
-                                        edit = edit.password(true);
-                                    }
-                                    ui.add(edit);
-                                    if ui
-                                        .add(
-                                            egui::Button::new(if show { "Hide" } else { "Show" })
-                                                .min_size(egui::vec2(48.0, 24.0)),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.show_password = !self.show_password;
-                                    }
-                                });
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.draft_password)
+                                        .desired_width(280.0),
+                                );
                                 ui.end_row();
 
                                 ui.label("Local port:");
@@ -653,6 +634,9 @@ pub fn run_gui() {
             // Spacing (8px grid)
             style.spacing.item_spacing = egui::vec2(8.0, 8.0);
             style.spacing.button_padding = egui::vec2(16.0, 6.0);
+
+            // Static text should not be selectable
+            style.interaction.selectable_labels = false;
 
             // Rounded widgets
             let cr = egui::CornerRadius::same(6);
