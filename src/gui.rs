@@ -440,7 +440,7 @@ impl State {
         let header = row![
             text(title).size(22),
             space::horizontal(),
-            button(text("\u{2190} Back").size(14))
+            button(text("Back").size(14))
                 .on_press(Message::GoBack)
                 .padding([6, 16])
                 .style(neutral_button_style),
@@ -477,7 +477,7 @@ impl State {
         ]
         .spacing(10);
 
-        let mut content = column![header, rule::horizontal(1), form].spacing(8);
+        let mut content = column![header, rule::horizontal(1)].spacing(8);
 
         if !self.edit_error.is_empty() {
             content = content.push(
@@ -486,6 +486,8 @@ impl State {
                     .color(Color::from_rgb(1.0, 0.3, 0.3)),
             );
         }
+
+        content = content.push(form);
 
         let buttons = row![
             button(text("Save").size(14))
@@ -752,6 +754,7 @@ pub fn run_gui() -> iced::Result {
     iced::application(|| State::default(), State::update, State::view)
         .title("Tropa Relay")
         .window_size(Size::new(550.0, 400.0))
+        .resizable(false)
         .theme(State::theme)
         .run()
 }
