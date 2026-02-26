@@ -44,6 +44,16 @@
 - [x] GitHub Actions workflow: build Linux amd64 + Windows amd64
 - [x] Automated GitHub Releases on tag push (attach binaries)
 
+## Icon rework
+
+- [ ] Rework tray icon to be just the white "T" letter on transparent background (no dark square)
+  - Re-trace or edit `assets/logo.svg` to remove the background rect, keep only the T path
+  - Regenerate `icon_32.rgba` and `icon_48.rgba` from the new transparent SVG
+  - Regenerate all PNGs (16–512) and `icon.ico`
+  - Window icon (`icon_48`) keeps the dark background so it looks good in taskbars
+  - Tray icon (`icon_32`) uses transparent background for a modern look
+  - May need separate SVGs: `logo.svg` (with bg, for README/window) and `tray.svg` (no bg, for tray)
+
 ## Phase 8: Distribution
 
 ### Windows
