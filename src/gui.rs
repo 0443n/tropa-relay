@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, MenuId};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, MenuId, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
 // ── Colors ──────────────────────────────────────────────────────
@@ -104,12 +104,14 @@ impl State {
         let _ = gtk::init();
 
         // Tray icon
+        let title_item = MenuItem::new("Tropa Relay", false, None);
+        let separator = PredefinedMenuItem::separator();
         let open_item = MenuItem::new("Open", true, None);
         let quit_item = MenuItem::new("Quit", true, None);
         let tray_open_id = open_item.id().clone();
         let tray_quit_id = quit_item.id().clone();
-        let menu =
-            Menu::with_items(&[&open_item, &quit_item]).expect("failed to build tray menu");
+        let menu = Menu::with_items(&[&title_item, &separator, &open_item, &quit_item])
+            .expect("failed to build tray menu");
         let rgba = vec![60, 130, 247, 255].repeat(16 * 16);
         let icon = tray_icon::Icon::from_rgba(rgba, 16, 16).expect("failed to create tray icon");
         let tray = TrayIconBuilder::new()

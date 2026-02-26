@@ -23,15 +23,18 @@
 
 ## Phase 6: Polish
 
-- [ ] Error handling — surface relay errors in GUI (connection refused, auth failed, port in use)
-- [ ] Config validation on save (no duplicate local ports, ports in valid range)
-- [ ] System tray icon — minimize to tray, restore on click
-- [ ] `--minimized` flag — starts with tray icon only, no window (window opens on tray click)
+- [x] Error handling — surface relay errors in GUI (connection refused, auth failed, port in use)
+- [x] Config validation on save (no duplicate local ports, ports in valid range)
+- [x] System tray icon — minimize to tray, restore on click
+- [x] `--minimized` flag — starts with tray icon only, no window (window opens on tray click)
   - Three runtime modes: `tropa-relay` (window + tray), `--minimized` (tray only), `--headless` (no GUI)
   - Update autostart to use `--minimized` instead of `--headless`
-- [ ] Self-update via `self_update` crate (GitHub Releases backend)
+- [x] Self-update via `self_update` crate (GitHub Releases backend)
   - Auto-check on launch, prompt if update available
   - Toggle in GUI to enable/disable auto-update
+- [x] `--help` flag with usage text and config path
+- [x] Fork to background by default (GUI mode), `--foreground` to stay attached
+- [x] Tray menu polish — app name header with separator
 - [ ] Test on Linux amd64
 - [ ] Test on Windows amd64
 

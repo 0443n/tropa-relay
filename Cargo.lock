@@ -4533,6 +4533,7 @@ dependencies = [
  "fast-socks5",
  "gtk",
  "iced",
+ "libc",
  "self_update",
  "serde",
  "tokio",

@@ -11,6 +11,59 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let headless = args.iter().any(|a| a == "--headless");
     let minimized = args.iter().any(|a| a == "--minimized");
+    let foreground = args.iter().any(|a| a == "--foreground");
+    let help = args.iter().any(|a| a == "--help" || a == "-h");
+
+    if help {
+        println!(
+            "\
+Tropa Relay — Local SOCKS5 relay
+
+Runs all enabled proxies from the config file.
+Config: {}
+
+Usage: tropa-relay [OPTIONS]
+
+Options:
+    --minimized    Start minimized to system tray
+    --headless     Run without GUI (CLI mode, runs all enabled proxies)
+    --foreground   Keep running in the foreground terminal
+    --help         Show this help message",
+            config::config_path().display()
+        );
+        return;
+    }
+
+    // GUI mode: fork to background unless --foreground or --headless
+    #[cfg(target_os = "linux")]
+    if !headless && !foreground {
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+
+        let exe = std::env::current_exe().expect("failed to get current exe path");
+        let mut child_args: Vec<&str> = args[1..].iter().map(|s| s.as_str()).collect();
+        child_args.push("--foreground");
+
+        let null = std::fs::File::open("/dev/null").expect("failed to open /dev/null");
+        let null_out = null.try_clone().expect("failed to clone /dev/null");
+        let null_err = null.try_clone().expect("failed to clone /dev/null");
+
+        unsafe {
+            Command::new(exe)
+                .args(&child_args)
+                .stdin(null)
+                .stdout(null_out)
+                .stderr(null_err)
+                .pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                })
+                .spawn()
+                .expect("failed to fork to background");
+        }
+        println!("Tropa Relay running in background");
+        return;
+    }
 
     if headless {
         let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
