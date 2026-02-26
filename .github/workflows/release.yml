@@ -55,6 +55,7 @@ jobs:
           Copy-Item "target/release/tropa-relay.exe" "installer/"
           Copy-Item "assets/icon.ico" "installer/"
           & "C:\Program Files (x86)\NSIS\makensis.exe" /DTAG=${{ github.ref_name }} "installer/tropa-relay.nsi"
+          Move-Item "installer/tropa-relay-*-setup.exe" .
         shell: pwsh
 
       - uses: actions/upload-artifact@v4
@@ -62,7 +63,7 @@ jobs:
           name: tropa-relay-${{ matrix.asset_name }}
           path: |
             tropa-relay-*.zip
-            installer/tropa-relay-*-setup.exe
+            tropa-relay-*-setup.exe
 
   release:
     needs: build
