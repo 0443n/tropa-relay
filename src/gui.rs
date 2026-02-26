@@ -782,12 +782,21 @@ fn form_field<'a>(
 }
 
 // ── Self-update helpers ─────────────────────────────────────────
+fn self_update_target() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows-amd64"
+    } else {
+        "linux-amd64"
+    }
+}
+
 async fn check_for_update() -> Option<String> {
     tokio::task::spawn_blocking(|| {
         let update = self_update::backends::github::Update::configure()
             .repo_owner("0443n")
             .repo_name("tropa-relay")
             .bin_name("tropa-relay")
+            .target(self_update_target())
             .current_version(env!("CARGO_PKG_VERSION"))
             .no_confirm(true)
             .build()
@@ -811,6 +820,7 @@ async fn perform_update() -> Result<(), String> {
             .repo_owner("0443n")
             .repo_name("tropa-relay")
             .bin_name("tropa-relay")
+            .target(self_update_target())
             .current_version(env!("CARGO_PKG_VERSION"))
             .no_confirm(true)
             .show_download_progress(false)
