@@ -33,10 +33,14 @@ Local SOCKS5 relay. Takes authenticated remote SOCKS5 proxies and re-exposes the
 - Linux: `~/.config/tropa-relay/config.toml`
 - Windows: `%APPDATA%\tropa-relay\config.toml`
 
+## Tools
+
+- `gh` CLI installed and authenticated — use for GitHub operations (releases, workflows, issues, PRs)
+
 ## GitHub
 
 - Repo: `0443n/tropa-relay`
 
 ## Current status
 
-See `TODO.md` for roadmap. Phases 1–5 complete. Next: Phase 6 (polish).
+See `TODO.md` for roadmap. Phases 1–6 complete. Next: Phase 7 (GitHub + CI).

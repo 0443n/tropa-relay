@@ -40,9 +40,9 @@
 
 ## Phase 7: GitHub + CI
 
-- [ ] Push repo to GitHub (`0443n/tropa-relay`)
-- [ ] GitHub Actions workflow: build Linux amd64 + Windows amd64
-- [ ] Automated GitHub Releases on tag push (attach binaries)
+- [x] Push repo to GitHub (`0443n/tropa-relay`)
+- [x] GitHub Actions workflow: build Linux amd64 + Windows amd64
+- [x] Automated GitHub Releases on tag push (attach binaries)
 
 ## Phase 8: Distribution
 
