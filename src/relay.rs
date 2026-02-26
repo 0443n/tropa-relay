@@ -3,7 +3,13 @@ use fast_socks5::client::Socks5Stream;
 use std::net::Ipv6Addr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
+
+#[derive(Debug, Clone)]
+pub enum RelayEvent {
+    Listening,
+    BindError(String),
+}
 
 /// Perform the server-side SOCKS5 handshake (no auth) and extract the target address.
 async fn socks5_accept(stream: &mut TcpStream) -> Result<(String, u16), Box<dyn std::error::Error>> {
@@ -129,12 +135,20 @@ async fn handle_connection(mut local: TcpStream, entry: &ProxyEntry) {
 }
 
 /// Run a single relay: listen on local_port, forward through the upstream SOCKS5 proxy.
-pub async fn run_relay(entry: ProxyEntry, mut shutdown: watch::Receiver<bool>) {
+pub async fn run_relay(
+    entry: ProxyEntry,
+    mut shutdown: watch::Receiver<bool>,
+    status_tx: Option<mpsc::UnboundedSender<(usize, RelayEvent)>>,
+    index: usize,
+) {
     let addr = format!("127.0.0.1:{}", entry.local_port);
     let listener = match TcpListener::bind(&addr).await {
         Ok(l) => l,
         Err(e) => {
             eprintln!("[{}] failed to bind {addr}: {e}", entry.name);
+            if let Some(tx) = &status_tx {
+                let _ = tx.send((index, RelayEvent::BindError(format!("Port {} already in use", entry.local_port))));
+            }
             return;
         }
     };
@@ -142,6 +156,9 @@ pub async fn run_relay(entry: ProxyEntry, mut shutdown: watch::Receiver<bool>) {
         "[{}] listening on {addr} -> {}:{}",
         entry.name, entry.remote_host, entry.remote_port
     );
+    if let Some(tx) = &status_tx {
+        let _ = tx.send((index, RelayEvent::Listening));
+    }
 
     loop {
         tokio::select! {
@@ -170,13 +187,13 @@ pub async fn run_relay(entry: ProxyEntry, mut shutdown: watch::Receiver<bool>) {
 /// Spawn a relay task for each enabled proxy entry.
 pub async fn run_all(config: AppConfig, shutdown: watch::Receiver<bool>) {
     let mut handles = Vec::new();
-    for entry in config.proxies {
+    for (i, entry) in config.proxies.into_iter().enumerate() {
         if !entry.enabled {
             continue;
         }
         let rx = shutdown.clone();
         handles.push(tokio::spawn(async move {
-            run_relay(entry, rx).await;
+            run_relay(entry, rx, None, i).await;
         }));
     }
     for h in handles {

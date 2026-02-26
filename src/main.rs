@@ -8,7 +8,9 @@ mod relay;
 use tokio::sync::watch;
 
 fn main() {
-    let headless = std::env::args().any(|a| a == "--headless");
+    let args: Vec<String> = std::env::args().collect();
+    let headless = args.iter().any(|a| a == "--headless");
+    let minimized = args.iter().any(|a| a == "--minimized");
 
     if headless {
         let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
@@ -23,6 +25,7 @@ fn main() {
                 eprintln!("Example config:\n");
                 let example = config::AppConfig {
                     autostart: false,
+                    auto_update: true,
                     proxies: vec![config::ProxyEntry {
                         name: "my-proxy".into(),
                         remote_host: "proxy.example.com".into(),
@@ -48,6 +51,6 @@ fn main() {
             let _ = relay_handle.await;
         });
     } else {
-        gui::run_gui().expect("failed to launch GUI");
+        gui::run_gui(minimized).expect("failed to launch GUI");
     }
 }

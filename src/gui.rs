@@ -1,13 +1,17 @@
 use crate::autostart;
 use crate::config::{AppConfig, ProxyEntry};
-use crate::relay;
+use crate::relay::{self, RelayEvent};
 use iced::widget::{
     button, checkbox, column, container, row, rule, scrollable, space, text, text_input,
 };
+use iced::window;
 use iced::{Border, Color, Element, Length, Shadow, Size, Task, Theme, Vector};
 use std::collections::HashMap;
-use tokio::sync::watch;
+use std::time::Duration;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, MenuId};
+use tray_icon::{TrayIcon, TrayIconBuilder};
 
 // ── Colors ──────────────────────────────────────────────────────
 const ACCENT: Color = Color::from_rgb(0.235, 0.514, 0.969);
@@ -67,34 +71,75 @@ struct State {
     rt: tokio::runtime::Runtime,
     config: AppConfig,
     relays: HashMap<usize, RelayHandle>,
+    relay_event_tx: mpsc::UnboundedSender<(usize, RelayEvent)>,
+    relay_event_rx: mpsc::UnboundedReceiver<(usize, RelayEvent)>,
+    relay_errors: HashMap<usize, String>,
     view: View,
     editing_index: Option<usize>,
     draft: DraftProxy,
     edit_error: String,
     confirm_delete: Option<usize>,
+    main_window: Option<window::Id>,
+    _tray: TrayIcon,
+    tray_open_id: MenuId,
+    tray_quit_id: MenuId,
+    update_available: Option<String>,
+    update_in_progress: bool,
+    update_done: bool,
 }
 
-impl Default for State {
-    fn default() -> Self {
+impl State {
+    fn new() -> Self {
         let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
         let mut config = AppConfig::load();
 
-        // Sync autostart config with actual filesystem/registry state
         let autostart_actual = autostart::is_enabled();
         if config.autostart != autostart_actual {
             config.autostart = autostart_actual;
             let _ = config.save();
         }
 
+        // GTK must be initialized before creating a tray icon on Linux
+        #[cfg(target_os = "linux")]
+        let _ = gtk::init();
+
+        // Tray icon
+        let open_item = MenuItem::new("Open", true, None);
+        let quit_item = MenuItem::new("Quit", true, None);
+        let tray_open_id = open_item.id().clone();
+        let tray_quit_id = quit_item.id().clone();
+        let menu =
+            Menu::with_items(&[&open_item, &quit_item]).expect("failed to build tray menu");
+        let rgba = vec![60, 130, 247, 255].repeat(16 * 16);
+        let icon = tray_icon::Icon::from_rgba(rgba, 16, 16).expect("failed to create tray icon");
+        let tray = TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_icon(icon)
+            .with_tooltip("Tropa Relay")
+            .build()
+            .expect("failed to build tray icon");
+
+        let (relay_event_tx, relay_event_rx) = mpsc::unbounded_channel();
+
         let mut state = Self {
             rt,
             config,
             relays: HashMap::new(),
+            relay_event_tx,
+            relay_event_rx,
+            relay_errors: HashMap::new(),
             view: View::List,
             editing_index: None,
             draft: DraftProxy::default(),
             edit_error: String::new(),
             confirm_delete: None,
+            main_window: None,
+            _tray: tray,
+            tray_open_id,
+            tray_quit_id,
+            update_available: None,
+            update_in_progress: false,
+            update_done: false,
         };
 
         let enabled: Vec<usize> = state
@@ -110,6 +155,19 @@ impl Default for State {
         }
 
         state
+    }
+
+    fn open_main_window(&mut self) -> Task<Message> {
+        if let Some(id) = self.main_window {
+            return iced::window::gain_focus(id);
+        }
+        let (id, open) = iced::window::open(iced::window::Settings {
+            size: Size::new(550.0, 400.0),
+            resizable: false,
+            ..Default::default()
+        });
+        self.main_window = Some(id);
+        open.map(Message::WindowOpened)
     }
 }
 
@@ -132,6 +190,14 @@ enum Message {
     ConfirmDelete(usize),
     CancelDelete,
     ToggleAutostart(bool),
+    Tick,
+    WindowOpened(window::Id),
+    WindowClosed(window::Id),
+    UpdateAvailable(String),
+    UpdateNotAvailable,
+    StartUpdate,
+    UpdateFinished(Result<(), String>),
+    ToggleAutoUpdate(bool),
 }
 
 // ── Relay management ────────────────────────────────────────────
@@ -143,8 +209,10 @@ impl State {
         if let Some(entry) = self.config.proxies.get(index) {
             let entry = entry.clone();
             let (tx, rx) = watch::channel(false);
+            let status_tx = self.relay_event_tx.clone();
+            let idx = index;
             let task = self.rt.spawn(async move {
-                relay::run_relay(entry, rx).await;
+                relay::run_relay(entry, rx, Some(status_tx), idx).await;
             });
             self.relays.insert(
                 index,
@@ -160,11 +228,13 @@ impl State {
         if let Some(handle) = self.relays.remove(&index) {
             let _ = handle.shutdown_tx.send(true);
         }
+        self.relay_errors.remove(&index);
     }
 
     fn remove_proxy(&mut self, index: usize) {
         self.stop_relay(index);
         self.config.proxies.remove(index);
+
         let mut new_relays = HashMap::new();
         for (i, handle) in self.relays.drain() {
             if i > index {
@@ -174,21 +244,32 @@ impl State {
             }
         }
         self.relays = new_relays;
+
+        let mut new_errors = HashMap::new();
+        for (i, error) in self.relay_errors.drain() {
+            if i > index {
+                new_errors.insert(i - 1, error);
+            } else if i < index {
+                new_errors.insert(i, error);
+            }
+        }
+        self.relay_errors = new_errors;
+
         let _ = self.config.save();
     }
 
     fn save_draft(&mut self) {
-        let remote_port: u16 = match self.draft.remote_port.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                self.edit_error = "Invalid remote port".into();
+        let remote_port: u16 = match self.draft.remote_port.parse::<u16>() {
+            Ok(p) if p >= 1 => p,
+            _ => {
+                self.edit_error = "Remote port must be 1\u{2013}65535".into();
                 return;
             }
         };
-        let local_port: u16 = match self.draft.local_port.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                self.edit_error = "Invalid local port".into();
+        let local_port: u16 = match self.draft.local_port.parse::<u16>() {
+            Ok(p) if p >= 1 => p,
+            _ => {
+                self.edit_error = "Local port must be 1\u{2013}65535".into();
                 return;
             }
         };
@@ -198,6 +279,18 @@ impl State {
         }
         if self.draft.remote_host.trim().is_empty() {
             self.edit_error = "Remote host is required".into();
+            return;
+        }
+
+        let has_duplicate = self
+            .config
+            .proxies
+            .iter()
+            .enumerate()
+            .any(|(i, p)| p.local_port == local_port && self.editing_index != Some(i));
+        if has_duplicate {
+            self.edit_error =
+                format!("Local port {local_port} is already used by another proxy");
             return;
         }
 
@@ -312,6 +405,61 @@ impl State {
                     }
                 }
             }
+            Message::Tick => {
+                // Process GTK events so the tray icon works on Linux
+                #[cfg(target_os = "linux")]
+                while gtk::events_pending() {
+                    gtk::main_iteration_do(false);
+                }
+
+                while let Ok((idx, event)) = self.relay_event_rx.try_recv() {
+                    match event {
+                        RelayEvent::Listening => {
+                            self.relay_errors.remove(&idx);
+                        }
+                        RelayEvent::BindError(msg) => {
+                            self.relay_errors.insert(idx, msg);
+                        }
+                    }
+                }
+                if let Ok(event) = MenuEvent::receiver().try_recv() {
+                    if *event.id() == self.tray_open_id {
+                        return self.open_main_window();
+                    } else if *event.id() == self.tray_quit_id {
+                        return iced::exit();
+                    }
+                }
+            }
+            Message::WindowOpened(_id) => {}
+            Message::WindowClosed(id) => {
+                if self.main_window == Some(id) {
+                    self.main_window = None;
+                }
+            }
+            Message::UpdateAvailable(version) => {
+                self.update_available = Some(version);
+            }
+            Message::UpdateNotAvailable => {}
+            Message::StartUpdate => {
+                self.update_in_progress = true;
+                return Task::perform(perform_update(), Message::UpdateFinished);
+            }
+            Message::UpdateFinished(result) => {
+                self.update_in_progress = false;
+                match result {
+                    Ok(()) => {
+                        self.update_done = true;
+                        self.update_available = None;
+                    }
+                    Err(e) => {
+                        eprintln!("update failed: {e}");
+                    }
+                }
+            }
+            Message::ToggleAutoUpdate(enabled) => {
+                self.config.auto_update = enabled;
+                let _ = self.config.save();
+            }
         }
         Task::none()
     }
@@ -319,7 +467,7 @@ impl State {
 
 // ── View ────────────────────────────────────────────────────────
 impl State {
-    fn view(&self) -> Element<'_, Message> {
+    fn view(&self, _window: window::Id) -> Element<'_, Message> {
         match &self.view {
             View::List => self.view_list(),
             View::EditForm => self.view_edit_form(),
@@ -336,6 +484,42 @@ impl State {
                 .style(accent_button_style),
         ]
         .align_y(iced::Alignment::Center);
+
+        let mut main_col = column![header, rule::horizontal(1)].spacing(8);
+
+        // Update banner
+        if self.update_done {
+            main_col = main_col.push(
+                container(text("Updated! Restart to apply.").size(14).color(ACCENT))
+                    .padding([8, 12])
+                    .width(Length::Fill)
+                    .style(card_container_style),
+            );
+        } else if self.update_in_progress {
+            main_col = main_col.push(
+                container(text("Updating\u{2026}").size(14).color(ACCENT))
+                    .padding([8, 12])
+                    .width(Length::Fill)
+                    .style(card_container_style),
+            );
+        } else if let Some(ref version) = self.update_available {
+            main_col = main_col.push(
+                container(
+                    row![
+                        text(format!("Update available: {version}")).size(14),
+                        space::horizontal(),
+                        button(text("Update now").size(13))
+                            .on_press(Message::StartUpdate)
+                            .padding([4, 12])
+                            .style(accent_button_style),
+                    ]
+                    .align_y(iced::Alignment::Center),
+                )
+                .padding([8, 12])
+                .width(Length::Fill)
+                .style(card_container_style),
+            );
+        }
 
         let content: Element<'_, Message> = if self.config.proxies.is_empty() {
             container(
@@ -363,23 +547,28 @@ impl State {
             scrollable(column(cards).spacing(8).width(Length::Fill)).into()
         };
 
-        let autostart_toggle = row![
+        main_col = main_col.push(content);
+
+        let footer = row![
             checkbox(self.config.autostart)
                 .on_toggle(Message::ToggleAutostart)
                 .style(checkbox_style),
             text("Start on login").size(13),
+            space::horizontal(),
+            checkbox(self.config.auto_update)
+                .on_toggle(Message::ToggleAutoUpdate)
+                .style(checkbox_style),
+            text("Auto-update").size(13),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
 
-        container(
-            column![header, rule::horizontal(1), content, autostart_toggle]
-                .spacing(8)
-                .padding(16),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        main_col = main_col.push(footer);
+
+        container(main_col.padding(16))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     fn view_proxy_card<'a>(
@@ -453,15 +642,21 @@ impl State {
         .spacing(8)
         .align_y(iced::Alignment::Center);
 
-        container(
-            column![row1, subtitle, row3]
-                .spacing(4)
-                .width(Length::Fill),
-        )
-        .padding(16)
-        .width(Length::Fill)
-        .style(card_container_style)
-        .into()
+        let mut card_content = column![row1, subtitle]
+            .spacing(4)
+            .width(Length::Fill);
+
+        if let Some(error) = self.relay_errors.get(&index) {
+            card_content = card_content.push(text(error).size(12).color(DANGER));
+        }
+
+        card_content = card_content.push(row3);
+
+        container(card_content)
+            .padding(16)
+            .width(Length::Fill)
+            .style(card_container_style)
+            .into()
     }
 
     fn view_edit_form(&self) -> Element<'_, Message> {
@@ -543,8 +738,19 @@ impl State {
             .into()
     }
 
-    fn theme(&self) -> Theme {
+    fn subscription(&self) -> iced::Subscription<Message> {
+        iced::Subscription::batch([
+            iced::time::every(Duration::from_millis(100)).map(|_| Message::Tick),
+            iced::window::close_events().map(Message::WindowClosed),
+        ])
+    }
+
+    fn theme(&self, _window: window::Id) -> Theme {
         Theme::Dark
+    }
+
+    fn title(&self, _window: window::Id) -> String {
+        String::from("Tropa Relay")
     }
 }
 
@@ -571,6 +777,49 @@ fn form_field<'a>(
     .spacing(12)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+// ── Self-update helpers ─────────────────────────────────────────
+async fn check_for_update() -> Option<String> {
+    tokio::task::spawn_blocking(|| {
+        let update = self_update::backends::github::Update::configure()
+            .repo_owner("0443n")
+            .repo_name("tropa-relay")
+            .bin_name("tropa-relay")
+            .current_version(env!("CARGO_PKG_VERSION"))
+            .no_confirm(true)
+            .build()
+            .ok()?;
+        let latest = update.get_latest_release().ok()?;
+        let current = env!("CARGO_PKG_VERSION");
+        if latest.version.trim_start_matches('v') != current {
+            Some(latest.version)
+        } else {
+            None
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn perform_update() -> Result<(), String> {
+    tokio::task::spawn_blocking(|| {
+        self_update::backends::github::Update::configure()
+            .repo_owner("0443n")
+            .repo_name("tropa-relay")
+            .bin_name("tropa-relay")
+            .current_version(env!("CARGO_PKG_VERSION"))
+            .no_confirm(true)
+            .show_download_progress(false)
+            .build()
+            .map_err(|e| e.to_string())?
+            .update()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ── Style: square border helper ─────────────────────────────────
@@ -784,11 +1033,36 @@ fn checkbox_style(_theme: &Theme, status: checkbox::Status) -> checkbox::Style {
 }
 
 // ── Entry point ─────────────────────────────────────────────────
-pub fn run_gui() -> iced::Result {
-    iced::application(|| State::default(), State::update, State::view)
-        .title("Tropa Relay")
-        .window_size(Size::new(550.0, 400.0))
-        .resizable(false)
-        .theme(State::theme)
-        .run()
+pub fn run_gui(minimized: bool) -> iced::Result {
+    iced::daemon(
+        move || {
+            let mut state = State::new();
+            let mut tasks: Vec<Task<Message>> = Vec::new();
+
+            if !minimized {
+                let (id, open) = iced::window::open(iced::window::Settings {
+                    size: Size::new(550.0, 400.0),
+                    resizable: false,
+                    ..Default::default()
+                });
+                state.main_window = Some(id);
+                tasks.push(open.map(Message::WindowOpened));
+            }
+
+            if state.config.auto_update {
+                tasks.push(Task::perform(check_for_update(), |result| match result {
+                    Some(v) => Message::UpdateAvailable(v),
+                    None => Message::UpdateNotAvailable,
+                }));
+            }
+
+            (state, Task::batch(tasks))
+        },
+        State::update,
+        State::view,
+    )
+    .title(State::title)
+    .subscription(State::subscription)
+    .theme(State::theme)
+    .run()
 }

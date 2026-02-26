@@ -18,7 +18,7 @@ pub fn enable() -> Result<(), String> {
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=Tropa Relay\n\
-         Exec={} --headless\n\
+         Exec={} --minimized\n\
          X-GNOME-Autostart-enabled=true\n",
         exe.display()
     );
@@ -50,7 +50,7 @@ pub fn enable() -> Result<(), String> {
     let (key, _) = hkcu
         .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
         .map_err(|e| format!("failed to open registry key: {e}"))?;
-    let value = format!("\"{}\" --headless", exe.display());
+    let value = format!("\"{}\" --minimized", exe.display());
     key.set_value("tropa-relay", &value)
         .map_err(|e| format!("failed to set registry value: {e}"))
 }

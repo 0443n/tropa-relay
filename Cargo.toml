@@ -9,7 +9,12 @@ fast-socks5 = "0.9"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 dirs = "6"
-iced = "0.14"
+iced = { version = "0.14", features = ["tokio"] }
+tray-icon = "0.19"
+self_update = { version = "0.42", default-features = false, features = ["archive-zip", "rustls"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

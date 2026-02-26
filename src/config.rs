@@ -13,12 +13,18 @@ pub struct ProxyEntry {
     pub enabled: bool,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub proxies: Vec<ProxyEntry>,
     #[serde(default)]
     pub autostart: bool,
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
 }
 
 impl Default for AppConfig {
@@ -26,6 +32,7 @@ impl Default for AppConfig {
         Self {
             proxies: vec![],
             autostart: false,
+            auto_update: true,
         }
     }
 }
