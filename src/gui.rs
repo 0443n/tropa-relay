@@ -1,3 +1,4 @@
+use crate::autostart;
 use crate::config::{AppConfig, ProxyEntry};
 use crate::relay;
 use iced::widget::{
@@ -76,7 +77,14 @@ struct State {
 impl Default for State {
     fn default() -> Self {
         let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-        let config = AppConfig::load();
+        let mut config = AppConfig::load();
+
+        // Sync autostart config with actual filesystem/registry state
+        let autostart_actual = autostart::is_enabled();
+        if config.autostart != autostart_actual {
+            config.autostart = autostart_actual;
+            let _ = config.save();
+        }
 
         let mut state = Self {
             rt,
@@ -123,6 +131,7 @@ enum Message {
     RequestDelete(usize),
     ConfirmDelete(usize),
     CancelDelete,
+    ToggleAutostart(bool),
 }
 
 // ── Relay management ────────────────────────────────────────────
@@ -287,6 +296,22 @@ impl State {
             Message::CancelDelete => {
                 self.confirm_delete = None;
             }
+            Message::ToggleAutostart(enabled) => {
+                let result = if enabled {
+                    autostart::enable()
+                } else {
+                    autostart::disable()
+                };
+                match result {
+                    Ok(()) => {
+                        self.config.autostart = enabled;
+                        let _ = self.config.save();
+                    }
+                    Err(e) => {
+                        eprintln!("autostart error: {e}");
+                    }
+                }
+            }
         }
         Task::none()
     }
@@ -338,8 +363,17 @@ impl State {
             scrollable(column(cards).spacing(8).width(Length::Fill)).into()
         };
 
+        let autostart_toggle = row![
+            checkbox(self.config.autostart)
+                .on_toggle(Message::ToggleAutostart)
+                .style(checkbox_style),
+            text("Start on login").size(13),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+
         container(
-            column![header, rule::horizontal(1), content]
+            column![header, rule::horizontal(1), content, autostart_toggle]
                 .spacing(8)
                 .padding(16),
         )

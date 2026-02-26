@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
 mod config;
 mod gui;
 mod relay;
@@ -21,6 +22,7 @@ fn main() {
                 );
                 eprintln!("Example config:\n");
                 let example = config::AppConfig {
+                    autostart: false,
                     proxies: vec![config::ProxyEntry {
                         name: "my-proxy".into(),
                         remote_host: "proxy.example.com".into(),

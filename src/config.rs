@@ -17,11 +17,16 @@ pub struct ProxyEntry {
 pub struct AppConfig {
     #[serde(default)]
     pub proxies: Vec<ProxyEntry>,
+    #[serde(default)]
+    pub autostart: bool,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
-        Self { proxies: vec![] }
+        Self {
+            proxies: vec![],
+            autostart: false,
+        }
     }
 }
 
