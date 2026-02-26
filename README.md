@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon_128.png" alt="Tropa Relay" />
+  <img src="assets/icon_128.png" alt="Tropa Relay" width="96" />
 </p>
 
 <h1 align="center">Tropa Relay</h1>
