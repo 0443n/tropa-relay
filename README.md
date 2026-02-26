@@ -1,26 +1,51 @@
-# tropa-relay
+<p align="center">
+  <img src="assets/icon_128.png" alt="Tropa Relay" />
+</p>
 
-Local SOCKS5 relay that forwards traffic through authenticated upstream SOCKS5 proxies. Configure multiple proxies, toggle them on/off, and use them as local no-auth SOCKS5 endpoints.
+<h1 align="center">Tropa Relay</h1>
+
+<p align="center">
+  Local SOCKS5 relay for your proxies.<br>
+  Takes authenticated remote SOCKS5 proxies and re-exposes them on localhost with no auth.
+</p>
+
+<p align="center">
+  <a href="https://github.com/0443n/tropa-relay/releases/latest">Download</a>
+</p>
+
+## How it works
+
+```
+App/Browser  -->  localhost:PORT (no auth)  -->  remote-proxy:PORT (user/pass)  -->  Internet
+```
+
+Add your SOCKS5 proxies with credentials, toggle them on/off, and point your apps at `127.0.0.1:<local_port>` — no authentication needed on the local side.
+
+## Install
+
+Download the latest release for your platform:
+
+- **Linux:** [tropa-relay-linux-amd64.zip](https://github.com/0443n/tropa-relay/releases/latest)
+- **Windows:** [tropa-relay-windows-amd64.zip](https://github.com/0443n/tropa-relay/releases/latest)
+
+Extract and run. No installation required.
 
 ## Usage
 
-### GUI
+| Mode | Command | Description |
+|------|---------|-------------|
+| GUI | `tropa-relay` | Window + system tray |
+| Minimized | `tropa-relay --minimized` | Tray only, click to open |
+| Headless | `tropa-relay --headless` | CLI only, no GUI |
 
-```
-cargo run
-```
-
-### Headless
-
-```
-cargo run -- --headless
-```
-
-Runs all enabled proxies without a window. Stop with Ctrl+C.
+Run `tropa-relay --help` for all options.
 
 ## Config
 
-Config lives at `~/.config/tropa-relay/config.toml` (Linux) or the platform equivalent. Created automatically on first run.
+Config is created automatically on first run at:
+
+- **Linux:** `~/.config/tropa-relay/config.toml`
+- **Windows:** `%APPDATA%\tropa-relay\config.toml`
 
 ```toml
 [[proxies]]
@@ -33,9 +58,17 @@ local_port = 11080
 enabled = true
 ```
 
-Each proxy listens on `127.0.0.1:<local_port>` and forwards CONNECT requests through the remote SOCKS5 proxy with the given credentials.
+## Features
 
-## Building
+- Multiple proxy support with per-proxy on/off toggle
+- System tray with minimize-to-tray
+- Start on login (autostart)
+- Auto-update from GitHub Releases
+- Dark theme
+
+## Building from source
+
+Requires Rust and system dependencies (Linux: `libgtk-3-dev libxdo-dev pkg-config`).
 
 ```
 cargo build --release

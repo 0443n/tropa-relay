@@ -27,6 +27,14 @@ const TEXT_DIM: Color = Color::from_rgb(0.55, 0.55, 0.55);
 const TEXT_MUTED: Color = Color::from_rgb(0.70, 0.70, 0.70);
 const BORDER_SUBTLE: Color = Color::from_rgb(0.25, 0.25, 0.25);
 
+// ── Icon ────────────────────────────────────────────────────────
+const ICON_32_RGBA: &[u8] = include_bytes!("../assets/icon_32.rgba");
+const ICON_48_RGBA: &[u8] = include_bytes!("../assets/icon_48.rgba");
+
+fn window_icon() -> Option<window::Icon> {
+    window::icon::from_rgba(ICON_48_RGBA.to_vec(), 48, 48).ok()
+}
+
 // ── Relay handle ────────────────────────────────────────────────
 struct RelayHandle {
     shutdown_tx: watch::Sender<bool>,
@@ -112,8 +120,8 @@ impl State {
         let tray_quit_id = quit_item.id().clone();
         let menu = Menu::with_items(&[&title_item, &separator, &open_item, &quit_item])
             .expect("failed to build tray menu");
-        let rgba = vec![60, 130, 247, 255].repeat(16 * 16);
-        let icon = tray_icon::Icon::from_rgba(rgba, 16, 16).expect("failed to create tray icon");
+        let icon = tray_icon::Icon::from_rgba(ICON_32_RGBA.to_vec(), 32, 32)
+            .expect("failed to create tray icon");
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_icon(icon)
@@ -166,6 +174,7 @@ impl State {
         let (id, open) = iced::window::open(iced::window::Settings {
             size: Size::new(550.0, 400.0),
             resizable: false,
+            icon: window_icon(),
             ..Default::default()
         });
         self.main_window = Some(id);
@@ -1055,6 +1064,7 @@ pub fn run_gui(minimized: bool) -> iced::Result {
                 let (id, open) = iced::window::open(iced::window::Settings {
                     size: Size::new(550.0, 400.0),
                     resizable: false,
+                    icon: window_icon(),
                     ..Default::default()
                 });
                 state.main_window = Some(id);
