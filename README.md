@@ -23,12 +23,23 @@ Add your SOCKS5 proxies with credentials, toggle them on/off, and point your app
 
 ## Install
 
-Download the latest release for your platform:
+### Windows
 
-- **Linux:** [tropa-relay-linux-amd64.zip](https://github.com/0443n/tropa-relay/releases/latest)
-- **Windows:** [tropa-relay-windows-amd64.zip](https://github.com/0443n/tropa-relay/releases/latest)
+**Recommended:** Download and run the [installer (.exe)](https://github.com/0443n/tropa-relay/releases/latest) — installs to your user profile, creates Start Menu shortcut, and registers in Add/Remove Programs. No admin required.
 
-Extract and run. No installation required.
+Alternatively, download the [portable ZIP](https://github.com/0443n/tropa-relay/releases/latest) and extract anywhere.
+
+> **Note:** The binary is not code-signed yet. Windows SmartScreen may warn on first run — click "More info" then "Run anyway".
+
+### Linux
+
+Download the [Linux ZIP](https://github.com/0443n/tropa-relay/releases/latest), then:
+
+```sh
+unzip tropa-relay-*-linux-amd64.zip
+chmod +x tropa-relay
+mv tropa-relay ~/.local/bin/   # or run from anywhere
+```
 
 ## Usage
 

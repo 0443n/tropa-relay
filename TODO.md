@@ -57,7 +57,7 @@
 ## Phase 8: Distribution
 
 ### Windows
-- [ ] NSIS installer (.exe), user-level install to `%LOCALAPPDATA%`
+- [x] NSIS installer (.exe), user-level install to `%LOCALAPPDATA%`
   - `RequestExecutionLevel user`, no UAC prompt
   - Install to `$LOCALAPPDATA\Programs\tropa-relay`
   - Registry keys in HKCU only
@@ -68,9 +68,9 @@
   - Without signing, SmartScreen will warn on first run
 
 ### Linux
-- [ ] Ship binary only, recommend `~/.local/bin/`
-- [ ] No packaging (no .deb/.rpm) for now
+- [x] Ship binary only, recommend `~/.local/bin/`
+- [x] No packaging (no .deb/.rpm) for now
 
 ### Both
-- [ ] Self-update pulls latest release from GitHub Releases
-- [ ] README with install instructions
+- [x] Self-update pulls latest release from GitHub Releases
+- [x] README with install instructions

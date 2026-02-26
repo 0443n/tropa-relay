@@ -48,10 +48,21 @@ jobs:
           BINARY: ${{ matrix.binary }}
           ASSET: ${{ matrix.asset_name }}
 
+      - name: Build installer (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install nsis -y
+          Copy-Item "target/release/tropa-relay.exe" "installer/"
+          Copy-Item "assets/icon.ico" "installer/"
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /DTAG=${{ github.ref_name }} "installer/tropa-relay.nsi"
+        shell: pwsh
+
       - uses: actions/upload-artifact@v4
         with:
           name: tropa-relay-${{ matrix.asset_name }}
-          path: tropa-relay-*.zip
+          path: |
+            tropa-relay-*.zip
+            installer/tropa-relay-*-setup.exe
 
   release:
     needs: build
@@ -64,5 +75,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: tropa-relay-*.zip
+          files: |
+            tropa-relay-*.zip
+            tropa-relay-*-setup.exe
           generate_release_notes: true
